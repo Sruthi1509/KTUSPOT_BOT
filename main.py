@@ -9,7 +9,7 @@ import os
 
 from config import load_environment
 from scraper import fetch_announcements
-from state import DatabaseError, filter_new, mark_sent
+from state import StateStoreError, filter_new, mark_sent
 from notifier import send_announcement
 
 
@@ -25,8 +25,8 @@ def run():
 
     try:
         new_items = filter_new(all_items)
-    except DatabaseError as error:
-        print(f"Database store/check failed: {error}")
+    except StateStoreError as error:
+        print(f"Supabase store/check failed: {error}")
         return
 
     print(json.dumps({"telegram_pending_count": len(new_items), "telegram_pending": new_items}, indent=2, ensure_ascii=False))
@@ -46,8 +46,8 @@ def run():
 
     try:
         mark_sent(sent_ok)
-    except DatabaseError as error:
-        print(f"Telegram sent {len(sent_ok)} announcement(s), but database recording failed: {error}")
+    except StateStoreError as error:
+        print(f"Telegram sent {len(sent_ok)} announcement(s), but Supabase recording failed: {error}")
         return
     print(f"Sent {len(sent_ok)} new announcement(s).")
 

@@ -1,3 +1,2 @@
 playwright
-psycopg[binary]
 requests

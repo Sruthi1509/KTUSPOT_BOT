@@ -1,73 +1,50 @@
 # KTU Announcement Telegram Bot
 
-Scrapes KTU announcements, sends only unseen ones to Telegram, and stores
-successful deliveries in PostgreSQL or a local SQLite database.
+Scrapes recent KTU announcements, stores them in a local Supabase Docker
+instance, and sends only pending announcements to Telegram.
 
-## Quick local run (no database URL)
+## Start Supabase locally
 
-No database setup is required to test the bot. With `DATABASE_URL` unset, it
-automatically creates `ktu_announcements.db` beside the Python files and uses
-it to prevent repeat messages. Keep this file as your local backup. Set
-`LOCAL_DB_PATH` only if you want it stored elsewhere.
+Install the [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)
+and Docker Desktop, then run this in the project folder:
 
-## PostgreSQL setup
-
-PostgreSQL is optional. To use it instead of the local backup:
-
-1. Create a database, for example `ktu_bot`.
-2. Run [postgres_schema.sql](postgres_schema.sql) against that database:
-
-   ```bash
-   psql "$DATABASE_URL" -f postgres_schema.sql
-   ```
-
-3. Set `DATABASE_URL` to a standard PostgreSQL connection URL:
-
-   ```text
-   postgresql://username:password@hostname:5432/ktu_bot
-   ```
-
-## Telegram setup
-
-1. In Telegram, open **@BotFather**, send `/newbot`, and follow the prompts.
-2. Copy the bot token BotFather returns. This is `TELEGRAM_BOT_TOKEN`.
-3. Add the bot to the target group/channel. For a channel, promote it to an
-   administrator with permission to post messages.
-4. Send a message in the target group, or send a direct message to the bot.
-5. In a browser, open `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`.
-   Find `"chat":{"id":...}` in the response. This numeric value is
-   `TELEGRAM_CHAT_ID`. Group and channel IDs commonly begin with `-100`.
-
-For a private channel, post one message after adding the bot before calling
-`getUpdates`. Do not commit the bot token or database password.
-
-## Install and run
-
-```bash
-pip install -r requirements.txt
-playwright install chromium
+```powershell
+supabase init
+supabase start
 ```
 
-Create a file named `.env` in this folder using `.env.example` as the format:
+`supabase start` prints the local API URL and `service_role key`. Apply the
+included migration with:
+
+```powershell
+supabase db reset
+```
+
+The table migration is stored in
+[20260807000000_create_ktu_announcements.sql](supabase/migrations/20260807000000_create_ktu_announcements.sql).
+
+## Configure the bot
+
+Create `.env` beside `main.py` with these values:
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=token-from-botfather
 TELEGRAM_CHAT_ID=your-chat-id
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_SERVICE_ROLE_KEY=service-role-key-from-supabase-start
 ```
 
-`main.py` loads `.env` automatically. Leave `DATABASE_URL` out to use the
-local SQLite backup database, then run `python main.py`.
+The service-role key is appropriate for this local server-side bot. Never put
+it in a browser application or commit `.env`.
 
-Every scraped announcement is stored in `ktu_announcements` immediately.
-The `telegram_sent_at` field is set only after Telegram confirms delivery, so
-failed sends can be retried. Each run prints the scraped data and pending
-Telegram items as formatted JSON in the terminal.
+## Install and run
 
-Only announcements dated today or within the previous two calendar days are
-scraped. Older KTU announcements are ignored.
-
-To inspect KTU's current rendered announcements:
-
-```bash
-python scraper.py
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\playwright.exe install chromium
+.\.venv\Scripts\python.exe main.py
 ```
+
+Each run prints structured JSON, stores every scraped item in Supabase, and
+sets `telegram_sent_at` only after Telegram accepts the message. The scraper
+only returns announcements dated today or within the preceding two days.
