@@ -10,12 +10,29 @@ from config import load_environment
 load_environment()
 
 
-def send_announcement(item: dict) -> bool:
+def send_announcement(item: dict) -> tuple[bool, bool]:
+    """Send the optional notification PDF, then the announcement text.
+
+    Returns ``(message_sent, document_sent_this_run)``.
+    """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not bot_token or not chat_id:
         print("Telegram is not configured: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
-        return False
+        return False, False
+    document_sent = False
+    if item.get("pdf_content") and not item.get("_document_sent"):
+        filename = item.get("pdf_filename") or "notification.pdf"
+        response = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendDocument",
+            data={"chat_id": chat_id},
+            files={"document": (filename, item["pdf_content"], "application/pdf")},
+            timeout=60,
+        )
+        if not response.ok:
+            print(f"Telegram PDF send failed for '{item['title']}': {response.text}")
+            return False, False
+        document_sent = True
     lines = [f"<b>KTU Announcement: {html.escape(item['title'])}</b>"]
     if item.get("date"):
         lines.append(html.escape(item["date"]))
@@ -27,4 +44,4 @@ def send_announcement(item: dict) -> bool:
                              json={"chat_id": chat_id, "text": "\n\n".join(lines), "parse_mode": "HTML", "disable_web_page_preview": True}, timeout=15)
     if not response.ok:
         print(f"Telegram send failed for '{item['title']}': {response.text}")
-    return response.ok
+    return response.ok, document_sent

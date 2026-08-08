@@ -22,6 +22,11 @@ supabase db reset
 
 The table migration is stored in
 [20260807000000_create_ktu_announcements.sql](supabase/migrations/20260807000000_create_ktu_announcements.sql).
+Existing databases can apply the new PDF-storage migration with:
+
+```powershell
+supabase migration up
+```
 
 ## Configure the bot
 
@@ -46,5 +51,9 @@ it in a browser application or commit `.env`.
 ```
 
 Each run prints structured JSON, stores every scraped item in Supabase, and
-sets `telegram_sent_at` only after Telegram accepts the message. The scraper
-only returns announcements dated today or within the preceding two days.
+uploads each available notification PDF to the private `announcement-pdfs`
+Supabase Storage bucket. Its object path is recorded in `ktu_announcements`.
+The bot sends the PDF as a Telegram document before sending the announcement
+text, and records each delivery so retries do not resend an already-delivered
+PDF. The scraper only returns announcements dated today or within the
+preceding two days.

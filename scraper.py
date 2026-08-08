@@ -1,4 +1,4 @@
-"""Fetch the newest announcements displayed on KTU's announcements page."""
+"""Fetch recent KTU announcements and their optional notification PDFs."""
 
 from datetime import date, datetime, timedelta
 
@@ -39,10 +39,29 @@ def fetch_announcements(debug: bool = False) -> list[dict]:
                 if not _is_within_last_two_days(date):
                     continue
                 description = (card.locator("div.m-t-10.font-14:not(.text-theme)").first.text_content() or "").strip()
-                button = card.locator("button").first
-                resource_id = button.get_attribute("value") if card.locator("button").count() else ""
+                buttons = card.locator("button")
+                resource_id = ""
+                pdf_content = None
+                pdf_filename = None
+                if buttons.count():
+                    button = buttons.first
+                    resource_id = button.get_attribute("value") or ""
+                    # KTU creates a blob download in the browser, so the PDF cannot be
+                    # obtained by constructing a URL from the button value.
+                    try:
+                        with page.expect_download(timeout=30_000) as download_info:
+                            button.click()
+                        download = download_info.value
+                        download_path = download.path()
+                        if download_path:
+                            with open(download_path, "rb") as pdf_file:
+                                pdf_content = pdf_file.read()
+                            pdf_filename = download.suggested_filename or "notification.pdf"
+                    except Exception as error:
+                        print(f"PDF download failed for '{title}': {error}")
                 results.append({"title": title, "date": date, "description": description,
-                                "link": page.url, "resource_id": resource_id or ""})
+                                "link": page.url, "resource_id": resource_id,
+                                "pdf_content": pdf_content, "pdf_filename": pdf_filename})
             return results
         finally:
             browser.close()

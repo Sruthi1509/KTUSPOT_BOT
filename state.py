@@ -2,12 +2,14 @@
 
 import hashlib
 import os
+from urllib.parse import quote
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import requests
 
 TABLE = "ktu_announcements"
+BUCKET = "announcement-pdfs"
 
 
 class StateStoreError(RuntimeError):
@@ -48,6 +50,23 @@ class SupabaseClient:
         return response
 
 
+def _upload_pdf(client: SupabaseClient, content_hash: str, item: dict) -> tuple[str, str] | tuple[None, None]:
+    """Store an announcement PDF in Supabase Storage and return its path/name."""
+    pdf_content = item.get("pdf_content")
+    if not pdf_content:
+        return None, None
+
+    filename = item.get("pdf_filename") or "notification.pdf"
+    path = f"{content_hash}.pdf"
+    client.request(
+        "POST",
+        f"/storage/v1/object/{BUCKET}/{quote(path, safe='/')}",
+        headers={"Content-Type": "application/pdf", "x-upsert": "true"},
+        data=pdf_content,
+    )
+    return path, filename
+
+
 def filter_new(items: list[dict]) -> list[dict]:
     """Persist scraped announcements and return the subset pending Telegram."""
     if not items:
@@ -83,13 +102,29 @@ def filter_new(items: list[dict]) -> list[dict]:
         response = client.request(
             "GET",
             f"/rest/v1/{TABLE}",
-            params={"select": "telegram_sent_at", "content_hash": f"eq.{content_hash}", "limit": "1"},
+            params={"select": "telegram_sent_at,pdf_path,pdf_filename,telegram_document_sent_at", "content_hash": f"eq.{content_hash}", "limit": "1"},
         )
         records = response.json()
         if not records:
             raise StateStoreError("Supabase did not return a stored announcement.")
-        if records[0]["telegram_sent_at"] is None:
+        record = records[0]
+        if record.get("pdf_path") is None and item.get("pdf_content"):
+            try:
+                pdf_path, pdf_filename = _upload_pdf(client, content_hash, item)
+                client.request(
+                    "PATCH",
+                    f"/rest/v1/{TABLE}",
+                    headers={"Content-Type": "application/json", "Prefer": "return=minimal"},
+                    params={"content_hash": f"eq.{content_hash}"},
+                    json={"pdf_path": pdf_path, "pdf_filename": pdf_filename},
+                )
+                record["pdf_path"] = pdf_path
+                record["pdf_filename"] = pdf_filename
+            except StateStoreError:
+                raise
+        if record["telegram_sent_at"] is None:
             item["_hash"] = content_hash
+            item["_document_sent"] = record.get("telegram_document_sent_at") is not None
             pending_items.append(item)
     return pending_items
 
@@ -108,3 +143,15 @@ def mark_sent(items: list[dict]) -> None:
             params={"content_hash": f"eq.{item['_hash']}"},
             json={"telegram_sent_at": datetime.now(timezone.utc).isoformat()},
         )
+
+
+def mark_document_sent(item: dict) -> None:
+    """Record document delivery, so a message retry does not duplicate the PDF."""
+    client = SupabaseClient.from_environment()
+    client.request(
+        "PATCH",
+        f"/rest/v1/{TABLE}",
+        headers={"Content-Type": "application/json", "Prefer": "return=minimal"},
+        params={"content_hash": f"eq.{item['_hash']}"},
+        json={"telegram_document_sent_at": datetime.now(timezone.utc).isoformat()},
+    )
